@@ -1,0 +1,22 @@
+{
+  "database": {
+    "path": "./macro_maintainer.sqlite3"
+  },
+  "mem0": {
+    "enabled": false,
+    "dup_threshold": 0.85,
+    "ttl_days": 30,
+    "prune_on_start": true,
+    "infer_on_add": false
+  },
+  "maintenance": {
+    "past_hours": 72,
+    "future_days": 7
+  },
+  "unattended": {
+    "enabled": false,
+    "task_name": "MacroMaintainer-UpdateDatabase",
+    "daily_at": "08:00",
+    "every_minutes": 0
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Shell(python -m event_maintainer.main *)",
+      "Shell(pytest *)",
+      "Write(scripts/.runtime/**)"
+    ],
+    "deny": [
+      "Shell(rm)",
+      "Write(**/*.sqlite3)"
+    ]
+  }
+}

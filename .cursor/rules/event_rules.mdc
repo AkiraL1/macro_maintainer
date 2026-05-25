@@ -1,0 +1,182 @@
+---
+description: Agent 按分类维护 events 的流程、信息采集、字段整理与输出格式
+alwaysApply: true
+---
+
+# 事件更新规则（按分类维护）
+
+**适用范围**：Agent 维护 `events` 表中某一或全部 `category` 下已有行，或向目标分类补入新事件时的**操作约束**。
+
+| 主题 | SSOT |
+|------|------|
+| `category` 注册与合法值 | [event_category.mdc](event_category.mdc) |
+| `ingest` 去重指纹、重复判定、`reason` | [事件入库去重规则.mdc](事件入库去重规则.mdc) |
+| 本文件 | 拉什么信息、整理什么字段、输出什么格式、按分类纠错流程 |
+
+所有写入仅经 CLI：`python -m event_maintainer.main <subcommand>`。禁止直接改 `.sqlite3`。
+
+---
+
+## 1. 维护前必拉信息
+
+每次会话**先**执行并解读输出：
+
+```powershell
+python -m event_maintainer.main category-audit
+python -m event_maintainer.main recency-window
+python -m event_maintainer.main recency-audit
+```
+
+### 时效性窗口（补库优先）
+
+- **已发生**：默认过去 **72 小时**内（数据公布、声明、已落地政策/行情）
+- **将发生**：默认未来 **7 天**内（发布会、FOMC、预定报告公布、央行讲话等）
+- 可调：`MAINTENANCE_PAST_HOURS`、`MAINTENANCE_FUTURE_DAYS`（`.env.example`）
+- `ingest` 的 `event_time` 须落在 `recency-window` 输出的 `[window_start_utc, window_end_utc]` 内；窗口外仅 `update-event` 纠错，不主动 `ingest` 扩库
+
+| 拉取命令 | 何时用 | Agent 须提取 |
+|----------|--------|--------------|
+| `category-audit` | 维护前/后 | `needs_maintenance`、`issues`（`empty` / `alias_only` / `unregistered_in_db` / `registered_missing_in_db`）及 `suggest` |
+| `recency-window` | 维护前 | `window_start_utc`、`window_end_utc`、`suggested_searches` |
+| `recency-audit` | 维护前/后 | `recent` / `upcoming` / `outside_window` 列表与计数；缺口驱动 `search-web` |
+| `list-events --maintenance-window` | 维护后核对 | 窗口内 `id`、`recency_phase`、`event_time` |
+| `list-events` | 纠错、枚举目标分类 | 全表 `id`、`category`、`title`；筛出目标 `label` 或待迁出错误值 |
+| `get-event <uuid>` | 单条核对 | 当前 `category` / `summary` / `country` 及缺字段情况 |
+| `search-web --query "..." [--count N] [--json]` | 向目标分类补新报道 | 标题、来源、时间、正文摘录（供草稿四指纹字段） |
+| `list-logs` | 维护后验证 | 意外 `rejected`（`update_event` / `ingest`） |
+| `list-duplicates` | 有 `ingest` 时 | 每条 `skipped` 的 `reason`（解读见去重规则） |
+
+`ingest` 是否重复、指纹四字段边界 → **仅**查 [事件入库去重规则.mdc](事件入库去重规则.mdc)，本文件不展开。
+
+---
+
+## 2. 字段整理边界
+
+### 2.1 已有行：`update-event` 可写字段
+
+```powershell
+python -m event_maintainer.main update-event --id <uuid> [--category <label>] [--summary "..."] [--country "..."]
+```
+
+| 字段 | 维护动作 | 说明 |
+|------|----------|------|
+| `category` | `update-event --category` | 须为注册表中文 `label`；`aliases` 会被拒绝 |
+| `summary` | `update-event --summary` | 一句话摘要；与分类主题一致 |
+| `country` | `update-event --country` | ISO 风格国家/地区码，如 `US`、`CN` |
+| `title` / `source` / `event_time` / `raw_content` | **禁止** `update-event` | 属去重指纹 → 见去重规则 |
+| `content` / `analysis` / `symbols` / `key_metrics` 等 | 当前 CLI **不支持** update | 新稿 `ingest` 时带齐；已有行缺字段记 `field_completion` pending |
+
+- 至少提供一个可选参数；否则 CLI 返回 `no updatable fields provided`。
+- 未注册 `category` → `status=rejected` 写入 `maintenance_logs`，**不**改 `events` 行。
+- 成功 → `status=updated`，`action=update_event`。
+
+### 2.2 新事件：草稿字段（`ingest` 输入）
+
+文件为 **JSON 数组**。每条**至少**（指纹与去重算法见去重规则）：
+
+| 字段 | 必填 | Agent 整理要求 |
+|------|------|----------------|
+| `title` | 是 | 报道标题，`strip` 后参与指纹 |
+| `source` | 是 | 媒体/机构名 |
+| `event_time` | 是 | ISO 8601，建议 UTC（如 `2026-05-15T18:00:00Z`） |
+| `raw_content` | 是 | 声明/通稿/摘录原文 |
+| `category` | 强烈建议 | 目标分类，须为注册 `label` |
+| `summary` | 建议 | 维护者归纳，一句为主 |
+| `country` | 建议 | 事件主关联国家/地区 |
+| `content` / `analysis` / `symbols` / `key_metrics` / `importance_score` / `impact_score` / `related_event_ids` / `end_time` / `extras` | 可选 | 有则写入，无则省略 |
+
+示例（单条，全字段；实际草稿可省略可选键）：
+
+```json
+[
+  {
+    "title": "美联储维持利率不变",
+    "source": "Reuters",
+    "event_time": "2026-05-15T18:00:00Z",
+    "raw_content": "The Federal Reserve decided to maintain the target range for the federal funds rate at 5-1/4 to 5-1/2 percent…",
+    "summary": "点阵图偏鹰，年内降息预期下调",
+    "content": "美联储在 5 月议息会议上决定维持联邦基金利率目标区间 5.25%–5.50% 不变。声明指出通胀仍偏高…",
+    "country": "US",
+    "category": "央行",
+    "importance_score": 0.95,
+    "impact_score": 0.88,
+    "symbols": ["US500", "DXY", "TLT", "GC"],
+    "analysis": "维持利率符合预期，但点阵图下调降息次数，短端利率与美元偏强，黄金承压。",
+    "end_time": "2026-05-15T19:30:00Z",
+    "key_metrics": [
+      {
+        "id": "fed-funds-upper",
+        "name": "联邦基金利率上限",
+        "value": "5.50",
+        "previous_value": "5.50",
+        "change": 0.0,
+        "unit": "%"
+      }
+    ],
+    "related_event_ids": ["550e8400-e29b-41d4-a716-446655440001"],
+    "extras": {
+      "meeting": "FOMC",
+      "statement_url": "https://www.federalreserve.gov/…"
+    }
+  }
+]
+```
+
+```powershell
+python -m event_maintainer.main ingest --input drafts.json
+```
+
+`ingest` 输出 JSON（`inserted` / `skipped` / `rejected`）；随后必查 `list-logs`。重复跳过 → 查去重规则，**不要**用 `update-event` 合并进已有行。
+
+---
+
+## 3. 按分类维护流程（Agent 逐步执行）
+
+对某一 `category`（或全库 `empty` / alias / 未注册行）纠错时：
+
+1. **审计** — `category-audit`；优先处理 `empty`、`alias_only`、`unregistered_in_db`。
+2. **枚举** — `list-events`；记下目标 `label` 下（或待迁出）每条 `id`。
+3. **更新已有行** — 对每个 `id` 调用 `update-event`（无 bulk CLI），例如：  
+   `python -m event_maintainer.main update-event --id <uuid> --category 央行`  
+   从 alias 迁入：用 audit 的 `suggest` 作为 `--category`。
+4. **补新事件**（若 `registered_missing_in_db` 或用户要求）— `search-web` → 按 §2.2 编写 `drafts.json` → `ingest`（去重见去重规则）。
+5. **验证** — `category-audit`（`needs_maintenance` 应为 false）、`list-logs`（无意外 `rejected`）；有 `ingest` 时加 `list-duplicates`；可选 `get-event <uuid>`。
+
+`registered_missing_in_db` **不能**单靠 `update-event` 消除：须对该分类 `ingest` 至少一条，或将其它分类事件迁入。
+
+**禁止**：为改分类而改 `title`/`raw_content`；若报道本身变了，按去重规则走新 `ingest`。
+
+---
+
+## 4. 分类边界（维护者判断）
+
+- 语义与 `examples` 以 [event_category.mdc](event_category.mdc) 为准；边界不清时选**最接近**的已注册 `label`。
+- 仅改分类、不改事实字段时，只动 `--category`；`summary`/`country` 不一致可在同次或后续 `update-event` 修正。
+- 新增 `label`：先改注册表 →（iOS 需独立色/图标则改 `docs/FRONTEND_DATA_ACCESS.md`）→ `ingest` 或 `update-event` 迁入 → `category-audit`。
+- iOS 展示契约见 `docs/FRONTEND_DATA_ACCESS.md`。
+
+---
+
+## 5. 维护会话输出（Agent 交付）
+
+会话结束须向用户说明：
+
+| 输出项 | 内容 |
+|--------|------|
+| 目标分类 | 本次维护的 `label`（可多个） |
+| 已执行命令 | `category-audit` / `list-events` / `update-event` / `search-web` / `ingest` 等 |
+| 变更摘要 | 每条 `update-event` 的 `id` 与改动字段；`ingest` 的 `inserted`/`skipped`/`rejected` 计数 |
+| 审计结果 | 末次 `category-audit` 的 `needs_maintenance` 与残留 `issues` |
+| 异常 | `list-logs` 中 `rejected`；`list-duplicates` 中 `skipped` 及 `reason`（引用去重规则解释） |
+
+推荐会话顺序：
+
+```powershell
+python -m event_maintainer.main category-audit
+# search-web + drafts.json → ingest（补新）和/或 update-event（纠错）
+python -m event_maintainer.main list-duplicates   # 若有 ingest
+python -m event_maintainer.main list-logs
+python -m event_maintainer.main category-audit
+```
+
+详细操作步骤见 `.cursor/skills/maintain-events/SKILL.md`。

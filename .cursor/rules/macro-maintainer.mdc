@@ -1,0 +1,24 @@
+---
+description: Macro maintainer — 3-table SQLite, CLI write path, FastAPI read API
+alwaysApply: true
+---
+
+# macro_maintainer
+
+- Business database has **exactly 3 tables**: `events`, `event_duplicates`, `maintenance_logs`. Do not add tables without updating MODULE_GUIDE.md.
+- **Never** run ad-hoc SQL against SQLite. All writes go through:
+
+  `python -m event_maintainer.main <subcommand>`
+
+- 分类注册表：`.cursor/rules/event_category.mdc`（SSOT）；维护前运行 `category-audit`。
+- 入库去重：`.cursor/rules/事件入库去重规则.mdc`（SSOT）；`ingest` 指纹与 `dedup_hash_match` / `mem0_semantic_match`。
+- 按分类维护：`.cursor/rules/event_rules.mdc`（Agent 信息采集、字段整理、输出格式与纠错流程；去重见上条）。
+- Maintenance workflow (Cursor CLI thinks; Python executes):
+  1. `category-audit`（分类与注册表双向校验）
+  2. `recency-window` + `recency-audit`（默认过去 72h + 未来 7d；补库仅窗口内）
+  3. `search-web --query "..."` for recent releases & upcoming calendar (DuckDuckGo HTML)
+  4. Build JSON event drafts（`category` 须为注册表 `label`；`event_time` 在窗口内）
+  5. `ingest --input <file.json>`
+  6. `db-status` / `list-duplicates` / `list-logs` / `list-events --maintenance-window`
+- iOS read contract: `docs/FRONTEND_DATA_ACCESS.md` — implement only via `apps/api/`, not CLI.
+- Do not reintroduce `event_maintainer/agent/` or Redis/multi-agent pipelines.

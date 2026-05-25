@@ -1,0 +1,44 @@
+更新数据库（无人值守维护会话）
+
+工作目录为项目根 macro_maintainer。请先阅读并遵循：
+- .cursor/skills/maintain-events/SKILL.md
+- .cursor/rules/event_category.mdc
+- .cursor/rules/事件入库去重规则.mdc
+- .cursor/rules/event_rules.mdc
+
+硬性约束：
+- 所有写库仅通过：python -m event_maintainer.main <子命令>
+- 禁止直接编辑 .sqlite3 或执行 ad-hoc SQL
+- update-event 仅可改 category / summary / country（及 categories）；禁止改 title / source / event_time / raw_content
+- ingest 草稿 JSON 写入 scripts/.runtime/drafts-<yyyyMMdd-HHmmss>.json（UTF-8，JSON 数组）
+
+时效性（必守，优先于泛化补库）：
+- 维护窗口：过去 72 小时内已发生 + 未来 7 天内将发生（发布会、数据/报告公布、央行决议等）
+- 先跑：python -m event_maintainer.main recency-window（窗口边界与 suggested_searches）
+- 再跑：python -m event_maintainer.main recency-audit（recent / upcoming / outside_window）
+- ingest 的 event_time 须落在窗口内：已发生 ∈ [window_start, reference_now]；即将发生 ∈ (reference_now, window_end]
+- 窗口外事件仅 category/summary/country 纠错，不为此扩库；outside_window 列表勿强行 ingest
+- 可选环境变量：MAINTENANCE_PAST_HOURS、MAINTENANCE_FUTURE_DAYS（默认 72 / 7）
+
+执行顺序（标准维护会话）：
+1. category-audit — 记录 needs_maintenance 与 issues（empty / alias_only / unregistered_in_db / registered_missing_in_db）
+2. recency-window → recency-audit — 明确本次要补的 recent 与 upcoming 缺口
+3. 优先处理 empty、alias_only、unregistered_in_db（update-event）；registered_missing_in_db 需 search-web + ingest
+4. 按 recency-window 的 suggested_searches 与缺口分两类 search-web：
+   - recent：72h 内已公布的数据、声明、行情
+   - upcoming：未来 7 天经济日历、FOMC/央行、重要发布会与报告时点
+   → 编写草稿（category 须为注册表中文 label）→ ingest --input <草稿路径>
+5. 若有 ingest：list-duplicates（解释每条 skipped 的 reason）与 list-logs（检查 rejected）
+6. list-events --maintenance-window — 核对窗口内条数与 recency_phase
+7. db-status
+8. 再次 category-audit — 目标 needs_maintenance 为 false
+
+搜索与草稿：
+- 每条草稿至少含 title、source、event_time（ISO 8601 UTC）、raw_content、category；建议含 summary、country
+- 即将发生的事件：title/source 反映日程本身；event_time 用计划公布/发布会开始时刻（UTC）
+- 同一指纹四字段勿为「蹭」已有行而篡改；重复跳过见去重规则，禁止用 update-event 合并重复稿
+
+结束时按 event_rules.mdc 会话交付格式输出摘要：
+- 目标分类、已执行 CLI 子命令、变更摘要（update-event 的 id 与字段；ingest 的 inserted/skipped/rejected）
+- 末次 category-audit 的 needs_maintenance 与残留 issues
+- list-logs 中 rejected；list-duplicates 中 skipped 及 reason

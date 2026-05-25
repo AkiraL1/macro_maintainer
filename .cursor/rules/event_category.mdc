@@ -1,0 +1,64 @@
+---
+description: 宏观事件 category 注册表与维护约定
+alwaysApply: true
+categories:
+  - label: 央行
+    aliases: [monetary_policy, central_bank]
+    examples: 利率决议、FOMC、QE
+  - label: 宏观
+    aliases: [macro]
+    examples: 通胀、GDP、财政政策
+  - label: 经济
+    aliases: [labor_market, economy]
+    examples: 非农、PMI、零售
+  - label: 加密货币
+    aliases: [crypto]
+    examples: 监管、ETF、稳定币
+---
+
+# 宏观事件分类注册表（SSOT）
+
+`categories[].label` 为**唯一允许写入数据库**的分类值（ingest / `update-event` 须精确匹配中文 `label`）。`aliases` 仅用于 audit 建议映射，**不得**作为 ingest 目标值。
+
+**多分类**：`events.categories_json` 为有序 JSON 数组，**下标 0 = 关联最强（主分类）**；`events.category` 列与主分类同步，供索引与旧客户端。ingest 用 `categories: ["央行","宏观"]`；单分类可继续用 `category` 或单元素 `categories`。
+
+## 分类说明
+
+下表与 frontmatter 中的 `examples` **仅作归类参考，不界定写入范围**；凡已注册的 `label` 均可用于符合维护者判断的事件，边界不清时选最接近项，必要时增补 `examples` 或新增 `label`，勿在代码中硬编码主题清单。
+
+| label | aliases（历史/草稿） | 参考（非穷尽） |
+|-------|---------------------|----------------|
+| 央行 | monetary_policy, central_bank | 见 frontmatter `examples` |
+| 宏观 | macro | 见 frontmatter `examples` |
+| 经济 | labor_market, economy | 见 frontmatter `examples` |
+| 加密货币 | crypto | 见 frontmatter `examples` |
+
+## 维护职责
+
+| 检查项 | 含义 | 处理 |
+|--------|------|------|
+| `registered_missing_in_db` | 注册表有、DB 无事件 | 补 `ingest` 或 `update-event` 迁入 |
+| `unregistered_in_db` | DB 有、注册表无 | 先注册或 `update-event` 到已注册 `label` |
+| `empty` | `category` 为空 | `update-event --category <label>` |
+| `alias_only` | 仍为 alias 字符串 | `update-event` 映射为对应 `label` |
+
+## 新增分类（强制顺序）
+
+1. 在本文件 frontmatter `categories` 增加 `label`（及 `aliases`）
+2. 更新 `docs/FRONTEND_DATA_ACCESS.md` §分类枚举（若 iOS 需独立色/图标）
+3. `ingest` 至少一条该分类事件，或批量 `update-event`
+4. `category-audit` 直至 `registered_missing_in_db` 与 `unregistered_in_db` 为空
+
+## 标准 CLI 工作流
+
+```powershell
+python -m event_maintainer.main category-audit
+python -m event_maintainer.main list-events
+python -m event_maintainer.main update-event --id <uuid> --category 央行
+python -m event_maintainer.main ingest --input drafts.json
+python -m event_maintainer.main list-logs
+```
+
+## iOS 契约
+
+初始四分类与 `docs/FRONTEND_DATA_ACCESS.md` 对齐。新增 `label` 时：若需独立 UI 色/图标，必须同步 iOS `EventCategory`；否则客户端显示为「其他」。

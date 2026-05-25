@@ -1,0 +1,27 @@
+[
+  {
+    "title": "美联储维持利率不变",
+    "source": "FOMC",
+    "event_time": "2026-05-18T14:00:00Z",
+    "end_time": "2026-05-18T15:00:00Z",
+    "raw_content": "美联储宣布维持联邦基金利率在 5.25%-5.5% 区间不变。",
+    "summary": "美联储宣布维持联邦基金利率不变。",
+    "content": "美联储宣布维持联邦基金利率在 5.25%-5.5% 区间不变。",
+    "country": "US",
+    "category": "央行",
+    "importance_score": 0.95,
+    "impact_score": 0.88,
+    "analysis": "利率维持不变短期内有利于风险资产。",
+    "symbols": ["US500", "DXY", "TLT"],
+    "key_metrics": [
+      {
+        "id": "metric-1",
+        "name": "联邦基金利率",
+        "value": "5.25%-5.50%",
+        "previous_value": "5.25%-5.50%",
+        "change": 0
+      }
+    ],
+    "related_event_ids": []
+  }
+]

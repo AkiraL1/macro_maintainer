@@ -1,0 +1,103 @@
+---
+description: 事件 ingest 去重指纹、语义去重与维护者行为（SSOT）
+alwaysApply: true
+---
+
+# 事件入库去重规则（SSOT）
+
+实现：`event_maintainer/dedup/service.py`、`event_maintainer/schemas/events.py`（`EventDraft.dedup_hash`）。  
+分类合法值见 [event_category.mdc](event_category.mdc)；`update-event` 可写字段边界见 [event_rules.mdc](event_rules.mdc)。
+
+---
+
+## 1. 去重指纹（`dedup_hash`）
+
+下列四字段构成**唯一入库指纹**。任意一项变化即产生新 `dedup_hash`，视为不同事件（可 `ingest` 为新行，除非被语义去重拦截）。
+
+| 字段 | 规范化（计算哈希前） |
+|------|----------------------|
+| `title` | `strip()`，再 `lower()` |
+| `source` | `strip()`，再 `lower()` |
+| `event_time` | `strip()`（ISO 8601 字符串，大小写/空格影响指纹） |
+| `raw_content` | `strip()` |
+
+算法：`json.dumps(payload, ensure_ascii=False, sort_keys=True)` → UTF-8 → **SHA-256** 十六进制字符串。  
+`fingerprint()` 与 `dedup_hash()` 等价。
+
+**不属于指纹**（同指纹下可不同，或通过 `update-event` 修正）：`summary`、`content`、`country`、`category`、`importance_score`、`impact_score`、`symbols`、`analysis`、`key_metrics`、`related_event_ids`、`end_time`、`extras` 等。
+
+---
+
+## 2. `ingest` 判定顺序
+
+对每条草稿（`EventDraft`），`MaintenanceService.ingest_events` 按序执行：
+
+1. **分类校验**（见 `event_category.mdc`）— 未注册 / 使用 `alias` → `rejected`，不写 `events`。
+2. **精确去重** — `events.dedup_hash` 已存在 → 重复，**不插入**。
+3. **语义去重**（可选）— Mem0 向量检索，最高分 ≥ 阈值 → 重复，**不插入**。
+4. **新事件** — 插入 `events`，并向 Mem0（或进程内 fallback）写入记忆。
+
+重复时：写入 `event_duplicates`；`maintenance_logs` 为 `action=dedup`、`status=skipped`，`detail` 形如 `{reason}:{score:.3f}`。
+
+---
+
+## 3. `reason` 枚举（维护者须能解释）
+
+| `reason` | 含义 | 典型 `score` |
+|----------|------|----------------|
+| `dedup_hash_match` | 四指纹字段与库内某行完全一致 | `1.0` |
+| `mem0_semantic_match` | 指纹不同，但语义检索命中且分数 ≥ 阈值 | Mem0 / fallback 返回的相似度 |
+| `new_event` | 未重复（仅内部判定，成功入库不写 `event_duplicates`） | — |
+
+说明重复跳过时，必须对照 `list-duplicates` 与 `list-logs`，区分 **`dedup_hash_match`** 与 **`mem0_semantic_match`**。
+
+---
+
+## 4. 语义去重（Mem0）
+
+- **查询文本**：`EventDraft.memory_text()` — 拼接非空的 `title`、`source`、`event_time`、`category`、`summary`（无 `summary` 时用 `raw_content`）。
+- **阈值**：环境变量 `MEM0_DUP_THRESHOLD`（默认 **0.85**）；`score >= 阈值` 判为重复。
+- **启用**：`MEM0_ENABLED=true` 且 `pip install -e ".[mem0]"`；密钥与路径见 `.env.example`。
+- **未启用 Mem0**：使用进程内 `SequenceMatcher` 对历史 `memory_text` 做 fallback 检索（仍走同一阈值逻辑）。
+- **记忆 TTL**：默认 `MEM0_TTL_DAYS=30`，元数据 `expires_on`；过期记忆不参与语义命中。Cursor 对话上下文**不是**长期去重库。
+
+成功入库后调用 `add_event_memory`，供后续草稿语义比对。
+
+---
+
+## 5. 维护者行为（Cursor CLI）
+
+| 场景 | 做法 |
+|------|------|
+| 修正 `category` / `summary` / `country` | `update-event` — **不改变** `dedup_hash` |
+| 改正 `title` / `source` / `event_time` / `raw_content` | **禁止** `update-event`；属新指纹 → 新 `ingest`，或先 `list-duplicates` 判断是否实为重复 |
+| `ingest` 被跳过 | **不要**用 `update-event` 把重复稿「合并」进已有行指纹 |
+| 实质新报道、指纹应不同 | 调整四指纹字段后重新 `ingest` |
+| 仅补全非指纹字段 | 对已存在 `id` 使用 `update-event`（当前 CLI 不支持改 `content`/`analysis` 等，见 `event_rules.mdc`） |
+
+**禁止**：直接编辑 `.sqlite3`；为去重而篡改指纹字段以「蹭」已有行。
+
+---
+
+## 6. 标准 CLI 工作流
+
+```powershell
+python -m event_maintainer.main ingest --input drafts.json
+python -m event_maintainer.main list-duplicates
+python -m event_maintainer.main list-logs
+python -m event_maintainer.main get-event <uuid>
+```
+
+`events.dedup_hash` 列 **UNIQUE**；`event_duplicates` 记录每次跳过的决策（含 `duplicate_event_id`、`reason`、`score`）。
+
+---
+
+## 7. 与相邻规则分工
+
+| 文档 | 职责 |
+|------|------|
+| **本文件** | 指纹定义、`ingest` 去重顺序、`reason`、Mem0 语义去重、重复时禁止合并 |
+| [event_category.mdc](event_category.mdc) | `category` 注册 `label` |
+| [event_rules.mdc](event_rules.mdc) | Agent 按分类维护：信息采集、字段整理、草稿/交付格式、纠错流程 |
+
+维护会话建议：`category-audit` →（`search-web` + 草稿）→ `ingest` → `list-duplicates` / `list-logs` → 对既有行 `update-event` → 再次 `category-audit`。
