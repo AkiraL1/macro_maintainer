@@ -1,0 +1,45 @@
+更新数据库（定时无人值守维护会话，每10分钟执行）
+
+工作目录：F:\APPPPPPPP\macro_maintainer_openclaw
+Python：python3（系统环境）
+
+先阅读：
+- scripts/prompts/update-database.txt（SSOT）
+- .cursor/skills/maintain-events/SKILL.md
+- .cursor/rules/event_category.mdc
+- .cursor/rules/事件入库去重规则.mdc
+- .cursor/rules/event_rules.mdc
+
+硬性约束：
+- 所有写库：python3 -m event_maintainer.main <子命令>
+- 禁止直接编辑 .sqlite3 或执行 ad-hoc SQL
+- update-event 仅可改 category / summary / country（及 categories）；禁止改 title / source / event_time / raw_content
+- ingest 草稿 JSON 写入 scripts/.runtime/drafts-<yyyyMMdd-HHmmss>.json（UTF-8，JSON 数组）
+
+时效性（必守，优先于泛化补库）：
+- 维护窗口：过去 72 小时内已发生 + 未来 7 天内将发生
+- 先跑：python3 -m event_maintainer.main recency-window（窗口边界与 suggested_searches）
+- 再跑：python3 -m event_maintainer.main recency-audit（recent / upcoming / outside_window）
+- ingest 的 event_time 须落在窗口内
+- 窗口外仅 category/summary/country 纠错，不为此扩库；outside_window 列表勿强行 ingest
+
+搜索策略（避免范围太小）：
+- suggested_searches 中的每条 query 直接使用，不额外加时间限制词（如 "last 72 hours"，窗口本身已定义）
+- 补查方向：宏观经济指标（PMI、GDP、CPI、PCE、非农、零售）、央行利率/决议/声明、加密货币市场动态、重要的央行讲话与国会证词
+- 若 suggested_searches 返回结果稀少，主动扩查：搜 "FOMC minutes" / "Fed balance sheet" / "Treasury yield" / "gold price" / "dollar index" / "WTI oil" 等宏观相关关键词
+- 每次 search-web 至少跑 3-5 条不同 query，覆盖经济/央行/加密货币三方向
+
+执行顺序：
+1. python3 -m event_maintainer.main category-audit — 记录 needs_maintenance
+2. python3 -m event_maintainer.main recency-window
+3. python3 -m event_maintainer.main recency-audit — 明确 recent / upcoming 缺口
+4. search-web + 草稿 + ingest（优先补 recent 缺口，再补 upcoming）
+5. python3 -m event_maintainer.main list-duplicates（若有 ingest） + list-logs
+6. python3 -m event_maintainer.main db-status
+7. python3 -m event_maintainer.main category-audit（末次，needs_maintenance 应为 false）
+
+结束时输出会话摘要：
+- 目标分类、已执行 CLI 子命令、变更摘要（ingest inserted/skipped/rejected）
+- 末次 category-audit 的 needs_maintenance 与残留 issues
+- list-logs 中 rejected；list-duplicates 中 skipped 及 reason
+- 如无任何变更，也应简报「本次窗口内无新增缺口，略过 ingest」

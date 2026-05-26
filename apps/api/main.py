@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 from apps.api.dependencies import get_context
+from apps.api.logging_setup import apply_uvicorn_log_timestamps
 from apps.api.routes import events, search
 
 app = FastAPI(
@@ -27,9 +28,12 @@ app.add_middleware(
 app.include_router(events.router)
 app.include_router(search.router)
 
+apply_uvicorn_log_timestamps()
+
 
 @app.on_event("startup")
 async def startup_event() -> None:
+    apply_uvicorn_log_timestamps()
     get_context().store.initialize()
 
 

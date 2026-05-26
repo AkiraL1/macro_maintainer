@@ -268,51 +268,26 @@ python -m event_maintainer.main get-event <duplicate_event_id>
 
 ---
 
-## 无人值守（本机 Windows）
+## OpenClaw 编排（替代 Cursor Agent CLI / GUI）
 
-定时由 **任务计划程序** 调用 Cursor Agent CLI，发送与「更新数据库」等价的维护提示词；Agent 按本技能与三份 `.mdc` 决策，写库仍仅经 `python -m event_maintainer.main`。
+维护推理与定时由 **OpenClaw** 负责；本仓库仅提供 CLI、规则与提示词 SSOT。详见 [docs/OPENCLAW_MAINTENANCE.md](../../docs/OPENCLAW_MAINTENANCE.md)。
 
 ### 前置条件
 
 | 项 | 说明 |
 |----|------|
-| Cursor Agent CLI | 独立命令 `agent`（或 `cursor-agent`）在 PATH；`agent login` 已完成（勿用编辑器 `cursor.cmd` 代替） |
+| OpenClaw | 工作区指向本项目根；可 Shell 执行 `python -m event_maintainer.main` |
 | Python | 项目根 `pip install -e ".[dev]"`（可选 `".[mem0]"` + `.env`） |
-| 权限 | [`.cursor/cli.json`](../cli.json) 已放行 `python -m event_maintainer.main *` |
-| 机器 | 触发时段 PC 开机且用户已登录（默认定时任务为交互式登录） |
+| 知识库 | 本技能 + 三份 `.mdc` + `scripts/prompts/update-database.txt` |
 
 ### 文件
 
 | 路径 | 用途 |
 |------|------|
-| `scripts/prompts/update-database.txt` | 无人值守提示词 SSOT |
-| `scripts/run-maintain-agent.ps1` | 单次运行：无头 `agent -p` + 日志 |
-| `scripts/register-scheduled-task.ps1` | 注册/卸载计划任务 `MacroMaintainer-UpdateDatabase` |
-| `scripts/logs/` | 运行日志（gitignore） |
-| `scripts/.runtime/` | 定时 ingest 草稿 JSON（gitignore） |
+| `scripts/prompts/update-database.txt` | 维护提示词 SSOT |
+| `scripts/.runtime/` | ingest 草稿 JSON（gitignore） |
+| `docs/OPENCLAW_MAINTENANCE.md` | OpenClaw 接入说明 |
 
-### 手动试跑
+### 验收
 
-```powershell
-cd <项目根>
-agent status
-.\scripts\run-maintain-agent.ps1
-```
-
-日志：`scripts/logs/maintain-<timestamp>.log`（可读过程）+ `maintain-<timestamp>.jsonl`（原始 stream-json）。默认解析 `[TOOL]` / `[ASSISTANT]` / `[THINK]` / `[RESULT]`。要思考链：`.\scripts\run-maintain-agent.ps1 -AgentModel claude-4.6-sonnet-medium-thinking`。旧纯文本：`-PlainText`。排错时可加 `-SkipStatusCheck`。
-
-### 注册每日任务
-
-```powershell
-.\scripts\register-scheduled-task.ps1              # 默认每天 08:00
-.\scripts\register-scheduled-task.ps1 -At "09:30"
-.\scripts\register-scheduled-task.ps1 -EveryMinutes 10   # 每 10 分钟（重叠则跳过）
-.\scripts\register-scheduled-task.ps1 -Unregister   # 卸载
-```
-
-验收：任务计划程序 → 找到 `MacroMaintainer-UpdateDatabase` → **立即运行** → 检查 `scripts/logs/` 与 `category-audit` / `list-logs`。
-
-### 风险
-
-- 脚本使用 `--force` 自动批准 Shell；仅建议在可信本机运行。
-- Agent 可能耗时较长；计划任务默认最长 3 小时，失败可重试 1 次（间隔 30 分钟）。
+末次 `category-audit` 的 `needs_maintenance` 为 false；`list-logs` 无意外 `rejected`；有 `ingest` 时查 `list-duplicates`。

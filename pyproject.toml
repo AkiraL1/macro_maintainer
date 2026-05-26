@@ -23,9 +23,6 @@ dev = [
     "pytest>=8.0",
     "httpx>=0.27",
 ]
-gui = [
-    "customtkinter>=5.2",
-]
 
 [tool.setuptools.packages.find]
 include = ["event_maintainer*", "apps*"]

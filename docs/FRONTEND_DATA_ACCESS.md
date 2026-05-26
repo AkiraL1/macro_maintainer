@@ -19,6 +19,7 @@
 uvicorn apps.api.main:app --reload
 # OpenAPI: http://127.0.0.1:8000/docs
 # 健康检查: GET /health → {"status":"ok"}
+# 访问日志含时间戳（加载 apps.api.main 时自动配置，如 2026-05-25 17:02:33 INFO: ...）
 ```
 
 数据库路径由 `event_maintainer` 环境配置（见 `.env` / `build_app_context()`），维护写入仅通过 CLI：`python -m event_maintainer.main <subcommand>`。

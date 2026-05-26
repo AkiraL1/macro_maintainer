@@ -12,10 +12,15 @@ CLI maintenance, SQLite store (3 tables), dedup, optional Mem0 (pip extra `[mem0
 | `dedup/` | Duplicate detection |
 | `recency/` | Maintenance window (default past 72h + future 7d), `recency-window` / `recency-audit` |
 | `tools/` | `ToolRegistry` — CLI-facing helpers |
-| `gui/` | CustomTkinter desktop panel — edit `settings.json`, workflow display, subprocess triggers |
-| `project_settings.py` | Load/save `settings.json`, `.env` sync, unattended schedule defaults (`unattended.enabled` false) |
-| `unattended_schedule.py` | Sync Task Scheduler with `settings.json`; GUI startup + save |
+| `project_settings.py` | Load `settings.json` — DB path, Mem0 flags, maintenance window (`maintenance.past_hours` / `future_days`) |
 | `apps/api/` | FastAPI read API for iOS (no writes) |
+
+### Maintenance orchestration (external)
+
+- **OpenClaw** runs maintenance sessions; see [docs/OPENCLAW_MAINTENANCE.md](docs/OPENCLAW_MAINTENANCE.md).
+- Prompt SSOT: `scripts/prompts/update-database.txt`
+- Rules/skills: `.cursor/rules/*.mdc`, `.cursor/skills/maintain-events/SKILL.md`
+- Draft JSON at ingest: prefer `scripts/.runtime/drafts-<timestamp>.json`
 
 ### Category registry
 

@@ -65,7 +65,7 @@ alwaysApply: true
 
 ---
 
-## 5. 维护者行为（Cursor CLI）
+## 5. 维护者行为（OpenClaw / 维护 Agent）
 
 | 场景 | 做法 |
 |------|------|

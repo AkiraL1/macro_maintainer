@@ -1,4 +1,4 @@
-"""Load/save project settings.json (GUI + unattended schedule SSOT)."""
+"""Load/save project settings.json (DB path, Mem0, maintenance window)."""
 from __future__ import annotations
 
 import json
@@ -32,12 +32,6 @@ def default_settings() -> dict[str, Any]:
             "infer_on_add": False,
         },
         "maintenance": {"past_hours": 72, "future_days": 7},
-        "unattended": {
-            "enabled": False,
-            "task_name": "MacroMaintainer-UpdateDatabase",
-            "daily_at": "08:00",
-            "every_minutes": 0,
-        },
     }
 
 

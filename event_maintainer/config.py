@@ -59,7 +59,7 @@ class AppSettings:
         )
     )
     mem0_user_id: str = os.getenv(
-        "MEM0_USER_ID", _setting(SETTINGS, "mem0.user_id", "cursor-agent")
+        "MEM0_USER_ID", _setting(SETTINGS, "mem0.user_id", "openclaw")
     )
     mem0_run_id: str = os.getenv(
         "MEM0_RUN_ID", _setting(SETTINGS, "mem0.run_id", "event-maintenance")
